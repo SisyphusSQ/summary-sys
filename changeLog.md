@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+### v0.1.1(20260218)
+#### feature:
+1. MCP新增远程SSH收集工具 `system_summary_remote`，支持通过SSH获取远程主机系统摘要信息
+2. MCP新增批量远程收集工具 `system_summary_remote_batch`，支持并行从多个SSH主机收集系统信息
+
+#### optimization:
+1. 抽取 `FormatBytes` 和 `FormatUptime` 函数到 `utils/format/format.go`，供多处复用
+2. `internal/formatter/text.go` 使用抽取的公共格式化函数
+3. `internal/mcp/handler/system.go` 使用抽取的公共格式化函数，并集成远程SSH收集能力
+
 ## v0.1.0 (2026-02-18)
 
 ### Features

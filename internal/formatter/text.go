@@ -3,9 +3,9 @@ package formatter
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/SisyphusSQ/summary-sys/internal/collector"
+	"github.com/SisyphusSQ/summary-sys/utils/format"
 )
 
 type TextFormatter struct{}
@@ -23,7 +23,7 @@ func (f *TextFormatter) Format(info *collector.SystemInfo) (string, error) {
 	sb.WriteString("=" + strings.Repeat("=", 78) + "\n")
 	sb.WriteString(fmt.Sprintf("# %s\n", info.Hostname))
 	sb.WriteString(fmt.Sprintf("OS: %s %s\n", info.OS, info.Kernel))
-	sb.WriteString(fmt.Sprintf("Uptime: %s\n", formatUptime(info.Uptime)))
+	sb.WriteString(fmt.Sprintf("Uptime: %s\n", format.FormatUptime(info.Uptime)))
 	sb.WriteString(fmt.Sprintf("Time: %s\n", info.Timestamp.Format("2006-01-02 15:04:05")))
 	sb.WriteString("=" + strings.Repeat("=", 78) + "\n\n")
 
@@ -68,12 +68,12 @@ func (f *TextFormatter) formatCPU(cpu *collector.CPUInfo) string {
 func (f *TextFormatter) formatMemory(mem *collector.MemoryInfo) string {
 	var sb strings.Builder
 	sb.WriteString("\n### Memory ###\n")
-	sb.WriteString(fmt.Sprintf("Total:     %s\n", formatBytes(mem.Total)))
-	sb.WriteString(fmt.Sprintf("Used:      %s (%.1f%%)\n", formatBytes(mem.Used), mem.UsedPercent))
-	sb.WriteString(fmt.Sprintf("Available: %s\n", formatBytes(mem.Available)))
+	sb.WriteString(fmt.Sprintf("Total:     %s\n", format.FormatBytes(mem.Total)))
+	sb.WriteString(fmt.Sprintf("Used:      %s (%.1f%%)\n", format.FormatBytes(mem.Used), mem.UsedPercent))
+	sb.WriteString(fmt.Sprintf("Available: %s\n", format.FormatBytes(mem.Available)))
 	if mem.SwapTotal > 0 {
 		sb.WriteString(fmt.Sprintf("Swap:      %s / %s (%.1f%%)\n",
-			formatBytes(mem.SwapUsed), formatBytes(mem.SwapTotal), mem.SwapPercent))
+			format.FormatBytes(mem.SwapUsed), format.FormatBytes(mem.SwapTotal), mem.SwapPercent))
 	}
 	return sb.String()
 }
@@ -102,8 +102,8 @@ func (f *TextFormatter) formatDisk(disk collector.DiskInfo) string {
 	sb.WriteString(strings.Repeat("-", fsWidth+40) + "\n")
 	for _, d := range disk {
 		sb.WriteString(fmt.Sprintf("%-*s %10s %10s %10s %7.1f%%\n",
-			fsWidth, d.MountPoint, formatBytes(d.Total), formatBytes(d.Used),
-			formatBytes(d.Available), d.UsedPercent))
+			fsWidth, d.MountPoint, format.FormatBytes(d.Total), format.FormatBytes(d.Used),
+			format.FormatBytes(d.Available), d.UsedPercent))
 	}
 	return sb.String()
 }
@@ -128,8 +128,8 @@ func (f *TextFormatter) formatNetwork(net *collector.NetworkInfo) string {
 		sb.WriteString(fmt.Sprintf("%-*s: %s\n", maxNameLen, iface.Name, strings.Join(iface.Addrs, ", ")))
 		if iface.Statistics != nil {
 			sb.WriteString(fmt.Sprintf("%-*s RX: %s TX: %s\n", maxNameLen+2, "",
-				formatBytes(iface.Statistics.BytesRecv),
-				formatBytes(iface.Statistics.BytesSent)))
+				format.FormatBytes(iface.Statistics.BytesRecv),
+				format.FormatBytes(iface.Statistics.BytesSent)))
 		}
 	}
 	sb.WriteString(fmt.Sprintf("TCP Connections: %d\n", net.NetstatTCP))
@@ -187,30 +187,4 @@ func (f *TextFormatter) formatProcess(proc *collector.ProcessInfo) string {
 		}
 	}
 	return sb.String()
-}
-
-func formatBytes(b uint64) string {
-	const unit = 1024
-	if b < unit {
-		return fmt.Sprintf("%dB", b)
-	}
-	div, exp := uint64(unit), 0
-	for n := b / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f%c", float64(b)/float64(div), "KMGTPE"[exp])
-}
-
-func formatUptime(d time.Duration) string {
-	d = d.Round(time.Minute)
-	h := d / time.Hour
-	d -= h * time.Minute
-	m := d / time.Minute
-	if h > 24 {
-		days := h / 24
-		h = h % 24
-		return fmt.Sprintf("%dd %dh %dm", days, h, m)
-	}
-	return fmt.Sprintf("%dh %dm", h, m)
 }

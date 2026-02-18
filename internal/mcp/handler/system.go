@@ -3,16 +3,26 @@ package handler
 import (
 	"context"
 	"fmt"
+	"strings"
+	"sync"
+	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/SisyphusSQ/summary-sys/internal/collector"
 	"github.com/SisyphusSQ/summary-sys/internal/formatter"
+	"github.com/SisyphusSQ/summary-sys/internal/ssh"
+	"github.com/SisyphusSQ/summary-sys/utils/format"
 )
 
 type SystemCollectorService struct {
 	localCollector *collector.LocalCollector
+}
+
+type RemoteCollectorService struct {
+	timeout  time.Duration
+	parallel int
 }
 
 func NewSystemCollectorService() *SystemCollectorService {
@@ -21,7 +31,273 @@ func NewSystemCollectorService() *SystemCollectorService {
 	}
 }
 
+func NewRemoteCollectorService() *RemoteCollectorService {
+	return &RemoteCollectorService{
+		timeout:  30 * time.Second,
+		parallel: 5,
+	}
+}
+
+// collectRemote collects system info from a single remote host via SSH
+func (s *RemoteCollectorService) collectRemote(ctx context.Context, host, user, password, keyPath string, port int) (*collector.SystemInfo, error) {
+	var authMethod ssh.AuthMethod
+
+	if keyPath != "" {
+		authMethod = ssh.KeyAuth{KeyPath: keyPath}
+	} else if password != "" {
+		authMethod = ssh.PasswordAuth{Password: password}
+	} else {
+		// Try default SSH keys
+		authMethod = ssh.DefaultKeyAuth{}
+	}
+
+	sshClient, err := ssh.NewClient(&ssh.Config{
+		Host:       host,
+		Port:       port,
+		User:       user,
+		AuthMethod: authMethod,
+		Timeout:    s.timeout,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("SSH connection failed: %w", err)
+	}
+	defer sshClient.Close()
+
+	remoteCollector, err := collector.NewRemoteCollector(sshClient)
+	if err != nil {
+		return nil, fmt.Errorf("create remote collector: %w", err)
+	}
+
+	return remoteCollector.Collect(ctx)
+}
+
+// collectRemoteBatch collects system info from multiple remote hosts in parallel
+func (s *RemoteCollectorService) collectRemoteBatch(ctx context.Context, hosts []string, user, password, keyPath string, port int) ([]RemoteHostResult, error) {
+	var wg sync.WaitGroup
+	results := make([]RemoteHostResult, len(hosts))
+	sem := make(chan struct{}, s.parallel)
+
+	for i, host := range hosts {
+		wg.Add(1)
+		go func(idx int, h string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			info, err := s.collectRemote(ctx, h, user, password, keyPath, port)
+			results[idx] = RemoteHostResult{
+				Host: h,
+				Info: info,
+				Err:  err,
+			}
+		}(i, host)
+	}
+
+	wg.Wait()
+	return results, nil
+}
+
+// RemoteHostResult holds the result of a remote collection attempt
+type RemoteHostResult struct {
+	Host string
+	Info *collector.SystemInfo
+	Err  error
+}
+
+func InitRemoteTools(s *server.MCPServer, remoteSvc *RemoteCollectorService) {
+	remoteSummaryTool := mcp.NewTool(
+		"system_summary_remote",
+		mcp.WithDescription("Get system summary from a remote host via SSH"),
+		mcp.WithString("host",
+			mcp.Required(),
+			mcp.Description("Remote SSH host IP or hostname"),
+		),
+		mcp.WithNumber("port",
+			mcp.DefaultNumber(22),
+			mcp.Description("SSH port"),
+		),
+		mcp.WithString("user",
+			mcp.Description("SSH username (default: root)"),
+		),
+		mcp.WithString("password",
+			mcp.Description("SSH password (optional if using key)"),
+		),
+		mcp.WithString("key_path",
+			mcp.Description("SSH private key path (optional)"),
+		),
+	)
+
+	s.AddTool(remoteSummaryTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args := request.GetArguments()
+
+		host, err := request.RequireString("host")
+		if err != nil {
+			return mcp.NewToolResultError("host parameter is required"), nil
+		}
+
+		port := 22
+		if p, ok := args["port"]; ok {
+			if pf, ok := p.(float64); ok {
+				port = int(pf)
+			}
+		}
+
+		user := "root"
+		if u, ok := args["user"].(string); ok {
+			user = u
+		}
+
+		password, _ := args["password"].(string)
+		keyPath, _ := args["key_path"].(string)
+
+		info, err := remoteSvc.collectRemote(ctx, host, user, password, keyPath, port)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Failed to collect from %s: %v", host, err)), nil
+		}
+
+		fmter, err := formatter.NewFormatter("json")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		output, err := fmter.Format(info)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		return mcp.NewToolResultText(output), nil
+	})
+
+	remoteBatchTool := mcp.NewTool(
+		"system_summary_remote_batch",
+		mcp.WithDescription("Get system summary from multiple remote hosts via SSH in parallel"),
+		mcp.WithArray("hosts",
+			mcp.Required(),
+			mcp.Description("List of remote SSH hosts"),
+			mcp.Items(map[string]any{"type": "string"}),
+		),
+		mcp.WithNumber("port",
+			mcp.DefaultNumber(22),
+			mcp.Description("SSH port"),
+		),
+		mcp.WithString("user",
+			mcp.Description("SSH username (default: root)"),
+		),
+		mcp.WithString("password",
+			mcp.Description("SSH password (optional if using key)"),
+		),
+		mcp.WithString("key_path",
+			mcp.Description("SSH private key path (optional)"),
+		),
+		mcp.WithNumber("parallel",
+			mcp.DefaultNumber(5),
+			mcp.Description("Number of parallel connections"),
+		),
+	)
+
+	s.AddTool(remoteBatchTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args := request.GetArguments()
+
+		var hosts []string
+		if hostsArg, ok := args["hosts"]; ok {
+			switch v := hostsArg.(type) {
+			case []any:
+				for _, h := range v {
+					if hStr, ok := h.(string); ok {
+						hosts = append(hosts, hStr)
+					}
+				}
+			case string:
+				hosts = strings.Split(v, ",")
+			}
+		}
+
+		if len(hosts) == 0 {
+			return mcp.NewToolResultError("hosts parameter is required"), nil
+		}
+
+		port := 22
+		if p, ok := args["port"]; ok {
+			if pf, ok := p.(float64); ok {
+				port = int(pf)
+			}
+		}
+
+		user := "root"
+		if u, ok := args["user"].(string); ok {
+			user = u
+		}
+
+		password, _ := args["password"].(string)
+		keyPath, _ := args["key_path"].(string)
+
+		parallel := 5
+		if par, ok := args["parallel"]; ok {
+			if pf, ok := par.(float64); ok {
+				parallel = int(pf)
+			}
+		}
+
+		remoteSvc.parallel = parallel
+		results, err := remoteSvc.collectRemoteBatch(ctx, hosts, user, password, keyPath, port)
+		if err != nil {
+			return mcp.NewToolResultError(fmt.Sprintf("Batch collection failed: %v", err)), nil
+		}
+
+		output, err := formatRemoteResults(results)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		return mcp.NewToolResultText(output), nil
+	})
+}
+
+func formatRemoteResults(results []RemoteHostResult) (string, error) {
+	var sb strings.Builder
+	sb.WriteString("Remote Collection Results:\n")
+	sb.WriteString(strings.Repeat("-", 50))
+	sb.WriteString("\n")
+
+	successCount := 0
+	failCount := 0
+
+	for _, r := range results {
+		sb.WriteString(fmt.Sprintf("\nHost: %s\n", r.Host))
+		if r.Err != nil {
+			sb.WriteString(fmt.Sprintf("  Status: FAILED\n"))
+			sb.WriteString(fmt.Sprintf("  Error: %v\n", r.Err))
+			failCount++
+		} else if r.Info != nil {
+			sb.WriteString(fmt.Sprintf("  Status: SUCCESS\n"))
+			sb.WriteString(fmt.Sprintf("  Hostname: %s\n", r.Info.Hostname))
+			sb.WriteString(fmt.Sprintf("  OS: %s\n", r.Info.OS))
+			if r.Info.CPU != nil {
+				sb.WriteString(fmt.Sprintf("  CPU Cores: %d\n", r.Info.CPU.PhysicalCores))
+			}
+			if r.Info.Memory != nil {
+				sb.WriteString(fmt.Sprintf("  Memory: %s / %s (%.1f%%)\n",
+					format.FormatBytes(r.Info.Memory.Used),
+					format.FormatBytes(r.Info.Memory.Total),
+					r.Info.Memory.UsedPercent))
+			}
+			if r.Info.LoadAvg != nil {
+				sb.WriteString(fmt.Sprintf("  Load: %.2f / %.2f / %.2f\n",
+					r.Info.LoadAvg.Load1, r.Info.LoadAvg.Load5, r.Info.LoadAvg.Load15))
+			}
+			successCount++
+		}
+	}
+
+	sb.WriteString(strings.Repeat("-", 50))
+	sb.WriteString(fmt.Sprintf("\nSummary: %d succeeded, %d failed\n", successCount, failCount))
+
+	return sb.String(), nil
+}
+
 func InitSystemTools(s *server.MCPServer, svc *SystemCollectorService) {
+	InitRemoteTools(s, NewRemoteCollectorService())
+
 	summaryTool := mcp.NewTool(
 		"system_summary_local",
 		mcp.WithDescription("Get local system summary including CPU, memory, disk, network, processes and load average"),
@@ -169,11 +445,11 @@ func formatCPUInfo(cpu *collector.CPUInfo) string {
 
 func formatMemoryInfo(mem *collector.MemoryInfo) string {
 	result := "Memory Information:\n"
-	result += fmt.Sprintf("Total: %s\n", formatBytes(mem.Total))
-	result += fmt.Sprintf("Used: %s (%.1f%%)\n", formatBytes(mem.Used), mem.UsedPercent)
-	result += fmt.Sprintf("Available: %s\n", formatBytes(mem.Available))
+	result += fmt.Sprintf("Total: %s\n", format.FormatBytes(mem.Total))
+	result += fmt.Sprintf("Used: %s (%.1f%%)\n", format.FormatBytes(mem.Used), mem.UsedPercent)
+	result += fmt.Sprintf("Available: %s\n", format.FormatBytes(mem.Available))
 	if mem.SwapTotal > 0 {
-		result += fmt.Sprintf("Swap: %s / %s (%.1f%%)\n", formatBytes(mem.SwapUsed), formatBytes(mem.SwapTotal), mem.SwapPercent)
+		result += fmt.Sprintf("Swap: %s / %s (%.1f%%)\n", format.FormatBytes(mem.SwapUsed), format.FormatBytes(mem.SwapTotal), mem.SwapPercent)
 	}
 	return result
 }
@@ -181,7 +457,7 @@ func formatMemoryInfo(mem *collector.MemoryInfo) string {
 func formatDiskInfo(disk *collector.DiskInfo) string {
 	result := "Disk Information:\n"
 	for _, d := range *disk {
-		result += fmt.Sprintf("%s: %s used / %s (%.1f%%)\n", d.MountPoint, formatBytes(d.Used), formatBytes(d.Total), d.UsedPercent)
+		result += fmt.Sprintf("%s: %s used / %s (%.1f%%)\n", d.MountPoint, format.FormatBytes(d.Used), format.FormatBytes(d.Total), d.UsedPercent)
 	}
 	return result
 }
@@ -235,17 +511,4 @@ func formatSystemInfo(info *collector.SystemInfo) string {
 	result += fmt.Sprintf("Architecture: %s\n", info.Architecture)
 	result += fmt.Sprintf("Uptime: %s\n", info.Uptime)
 	return result
-}
-
-func formatBytes(b uint64) string {
-	const unit = 1024
-	if b < unit {
-		return fmt.Sprintf("%dB", b)
-	}
-	div, exp := uint64(unit), 0
-	for n := b / unit; n >= unit; n /= unit {
-		div *= unit
-		exp++
-	}
-	return fmt.Sprintf("%.1f%c", float64(b)/float64(div), "KMGTPE"[exp])
 }
