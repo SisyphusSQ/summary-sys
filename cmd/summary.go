@@ -156,7 +156,18 @@ func collectRemoteHost(host string, fmter formatter.Formatter, cmd *cobra.Comman
 	} else if sshPassword != "" {
 		auth = ssh.PasswordAuth{Password: sshPassword}
 	} else {
-		return result{host: host, err: fmt.Errorf("SSH auth required: --ssh-key or --ssh-password")}
+		l.Logger.Infof("no SSH auth provided, trying SSH agent or default keys")
+
+		agentAuth := ssh.AgentAuth{}
+		defaultKeyAuth := ssh.DefaultKeyAuth{}
+
+		if agentAuth.Available() {
+			auth = agentAuth
+		} else if defaultKeyAuth.Available() {
+			auth = defaultKeyAuth
+		} else {
+			return result{host: host, err: fmt.Errorf("no SSH authentication available: SSH_AUTH_SOCK not set and no default keys found")}
+		}
 	}
 
 	client, err := ssh.NewClient(&ssh.Config{

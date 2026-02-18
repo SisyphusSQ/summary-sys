@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  summary-sys:
+    image: summary-sys:latest
+    container_name: summary-sys-mcp
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./mcp.json:/app/mcp.json:ro
+    environment:
+      - LOG_LEVEL=info
+    command: ["mcp", "--transport", "all", "--config", "/app/mcp.json"]
+
+  # Example: Claude Desktop connects via stdio to the host binary
+  # No extra config needed - use local binary path in claude_desktop_config.json
+
+  # Example: Web app connects via SSE
+  webapp:
+    image: nginx:alpine
+    depends_on:
+      - summary-sys
+    ports:
+      - "3000:80"
+    environment:
+      - MCP_SERVER_URL=http://summary-sys:8080/mcp

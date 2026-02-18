@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "summary-sys": {
+      "command": "/absolute/path/to/bin/summary-sys",
+      "args": ["mcp"]
+    }
+  }
+}

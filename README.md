@@ -217,10 +217,29 @@ summary-sys/
 │       ├── server.go
 │       └── handler/
 │           └── system.go  # System collection tools
+├── docs/
+│   └── examples/         # MCP configuration examples
 ├── pkg/log              # Logger
 ├── utils/              # Utilities
 ├── main.go             # Entry point
+├── CHANGELOG.md        # Changelog
 └── go.mod
+```
+
+## Examples
+
+See `docs/examples/` directory for complete configuration examples:
+
+- [MCP Server Configuration](./docs/examples/mcp.json)
+- [Claude Desktop Integration](./docs/examples/claude_desktop_config.json)
+- [Cursor IDE Integration](./docs/examples/cursor_mcp.json)
+- [Web App Integration](./docs/examples/webapp_mcp_config.json)
+- [Docker Deployment](./docs/examples/docker-compose.yml)
+
+Debug MCP server with Inspector:
+
+```bash
+npx @modelcontextprotocol/inspector ./bin/summary-sys mcp
 ```
 
 ## Development

@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "summary-sys-sse": {
+      "url": "http://localhost:8080/mcp"
+    },
+    "summary-sys-http": {
+      "url": "http://localhost:8080/mcp/stream"
+    }
+  }
+}

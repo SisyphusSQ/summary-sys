@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "summary-sys": {
+      "command": "/absolute/path/to/bin/summary-sys",
+      "args": ["mcp"],
+      "env": {}
+    },
+    "summary-sys-with-config": {
+      "command": "/absolute/path/to/bin/summary-sys",
+      "args": ["mcp", "--config", "/path/to/mcp.json"],
+      "env": {}
+    }
+  }
+}

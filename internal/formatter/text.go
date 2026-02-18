@@ -81,11 +81,28 @@ func (f *TextFormatter) formatMemory(mem *collector.MemoryInfo) string {
 func (f *TextFormatter) formatDisk(disk collector.DiskInfo) string {
 	var sb strings.Builder
 	sb.WriteString("\n### Disk ###\n")
-	sb.WriteString(fmt.Sprintf("%-20s %10s %10s %10s %8s\n", "Filesystem", "Size", "Used", "Avail", "Use%"))
-	sb.WriteString(strings.Repeat("-", 70) + "\n")
+
+	if len(disk) == 0 {
+		return sb.String()
+	}
+
+	minWidth := 20
+	maxMountLen := len("Filesystem")
 	for _, d := range disk {
-		sb.WriteString(fmt.Sprintf("%-20s %10s %10s %10s %7.1f%%\n",
-			d.MountPoint, formatBytes(d.Total), formatBytes(d.Used),
+		if len(d.MountPoint) > maxMountLen {
+			maxMountLen = len(d.MountPoint)
+		}
+	}
+	if maxMountLen < minWidth {
+		maxMountLen = minWidth
+	}
+
+	fsWidth := maxMountLen
+	sb.WriteString(fmt.Sprintf("%-*s %10s %10s %10s %8s\n", fsWidth, "Filesystem", "Size", "Used", "Avail", "Use%"))
+	sb.WriteString(strings.Repeat("-", fsWidth+40) + "\n")
+	for _, d := range disk {
+		sb.WriteString(fmt.Sprintf("%-*s %10s %10s %10s %7.1f%%\n",
+			fsWidth, d.MountPoint, formatBytes(d.Total), formatBytes(d.Used),
 			formatBytes(d.Available), d.UsedPercent))
 	}
 	return sb.String()
@@ -94,10 +111,23 @@ func (f *TextFormatter) formatDisk(disk collector.DiskInfo) string {
 func (f *TextFormatter) formatNetwork(net *collector.NetworkInfo) string {
 	var sb strings.Builder
 	sb.WriteString("\n### Network ###\n")
+
+	if len(net.Interfaces) == 0 {
+		sb.WriteString("No network interfaces\n")
+		return sb.String()
+	}
+
+	maxNameLen := 10
 	for _, iface := range net.Interfaces {
-		sb.WriteString(fmt.Sprintf("%s: %s\n", iface.Name, strings.Join(iface.Addrs, ", ")))
+		if len(iface.Name) > maxNameLen {
+			maxNameLen = len(iface.Name)
+		}
+	}
+
+	for _, iface := range net.Interfaces {
+		sb.WriteString(fmt.Sprintf("%-*s: %s\n", maxNameLen, iface.Name, strings.Join(iface.Addrs, ", ")))
 		if iface.Statistics != nil {
-			sb.WriteString(fmt.Sprintf("  RX: %s TX: %s\n",
+			sb.WriteString(fmt.Sprintf("%-*s RX: %s TX: %s\n", maxNameLen+2, "",
 				formatBytes(iface.Statistics.BytesRecv),
 				formatBytes(iface.Statistics.BytesSent)))
 		}
@@ -120,17 +150,41 @@ func (f *TextFormatter) formatLoadAvg(load *collector.LoadAvgInfo) string {
 func (f *TextFormatter) formatProcess(proc *collector.ProcessInfo) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("\n### Processes (%d total) ###\n", proc.Count))
-	sb.WriteString("\nTop 10 CPU:\n")
-	sb.WriteString(fmt.Sprintf("%-8s %-15s %8s %8s %s\n", "PID", "USER", "CPU%", "MEM%", "COMMAND"))
-	for _, p := range proc.TopCPU {
-		sb.WriteString(fmt.Sprintf("%-8d %-15s %7.1f %7.1f %s\n",
-			p.PID, p.User, p.CPUPercent, p.MemPercent, p.Name))
+
+	if len(proc.TopCPU) == 0 && len(proc.TopMemory) == 0 {
+		return sb.String()
 	}
-	sb.WriteString("\nTop 10 Memory:\n")
-	sb.WriteString(fmt.Sprintf("%-8s %-15s %8s %8s %s\n", "PID", "USER", "CPU%", "MEM%", "COMMAND"))
+
+	pidWidth := 8
+	userWidth := 15
+	cmdWidth := 15
+	for _, p := range proc.TopCPU {
+		if len(p.Name) > cmdWidth {
+			cmdWidth = len(p.Name)
+		}
+	}
 	for _, p := range proc.TopMemory {
-		sb.WriteString(fmt.Sprintf("%-8d %-15s %7.1f %7.1f %s\n",
-			p.PID, p.User, p.CPUPercent, p.MemPercent, p.Name))
+		if len(p.Name) > cmdWidth {
+			cmdWidth = len(p.Name)
+		}
+	}
+
+	if len(proc.TopCPU) > 0 {
+		sb.WriteString("\nTop 10 CPU:\n")
+		sb.WriteString(fmt.Sprintf("%-*s %-*s %8s %8s %s\n", pidWidth, "PID", userWidth, "USER", "CPU%", "MEM%", "COMMAND"))
+		for _, p := range proc.TopCPU {
+			sb.WriteString(fmt.Sprintf("%-*d %-*s %7.1f %7.1f %s\n",
+				pidWidth, p.PID, userWidth, p.User, p.CPUPercent, p.MemPercent, p.Name))
+		}
+	}
+
+	if len(proc.TopMemory) > 0 {
+		sb.WriteString("\nTop 10 Memory:\n")
+		sb.WriteString(fmt.Sprintf("%-*s %-*s %8s %8s %s\n", pidWidth, "PID", userWidth, "USER", "CPU%", "MEM%", "COMMAND"))
+		for _, p := range proc.TopMemory {
+			sb.WriteString(fmt.Sprintf("%-*d %-*s %7.1f %7.1f %s\n",
+				pidWidth, p.PID, userWidth, p.User, p.CPUPercent, p.MemPercent, p.Name))
+		}
 	}
 	return sb.String()
 }

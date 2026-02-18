@@ -11,6 +11,21 @@ All notable changes to this project will be documented in this file.
 4. **Parallel SSH Execution**: Added `--parallel` flag for concurrent collection from multiple hosts
 5. **MCP Server Integration**: Exposed system info tools via MCP protocol (stdio mode)
 
+### Documentation
+- Added `docs/examples/` directory with MCP configuration examples:
+  - `mcp.json` - Basic MCP server configuration
+  - `claude_desktop_config.json` - Claude Desktop integration
+  - `cursor_mcp.json` - Cursor IDE integration
+  - `webapp_mcp_config.json` - Web application SSE/HTTP integration
+  - `docker-compose.yml` - Docker deployment example
+  - `README.md` - Configuration documentation with Inspector usage guide
+- Added MCP Inspector usage documentation covering:
+  - Installation (npm/npx)
+  - stdio transport testing
+  - SSE/HTTP transport testing
+  - Command-line options
+  - Troubleshooting guide
+
 ### Architecture
 - `LocalCollector`: Uses gopsutil to collect local system info
 - `RemoteCollector`: Executes commands via SSH on remote hosts (batch execution)

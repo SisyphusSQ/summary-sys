@@ -1,0 +1,18 @@
+{
+  "name": "summary-sys",
+  "version": "0.1.0",
+  "description": "System summary collection MCP server",
+  "transport": "stdio",
+  "host": "0.0.0.0",
+  "port": 8080,
+  "enable_stdio": true,
+  "enable_sse": true,
+  "enable_http": true,
+  "collection": {
+    "timeout": 30,
+    "parallel_ssh": 5
+  },
+  "logging": {
+    "level": "info"
+  }
+}
