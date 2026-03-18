@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/spf13/cobra"
@@ -17,7 +18,7 @@ var (
 	outputFormat string
 	outputFile   string
 	sshEnabled   bool
-	sshHosts     []string
+	sshHosts     string
 	sshUser      string
 	sshPort      int
 	sshKeyPath   string
@@ -43,8 +44,8 @@ func init() {
 
 	summaryCmd.Flags().BoolVar(&sshEnabled, "ssh", false,
 		"Collect from remote hosts via SSH")
-	summaryCmd.Flags().StringSliceVar(&sshHosts, "hosts", []string{},
-		"SSH hosts (can be repeated)")
+	summaryCmd.Flags().StringVar(&sshHosts, "hosts", "",
+		"SSH hosts (comma-separated, e.g., 192.168.1.1,192.168.1.2)")
 	summaryCmd.Flags().StringVar(&sshUser, "ssh-user", "root",
 		"SSH username")
 	summaryCmd.Flags().IntVar(&sshPort, "ssh-port", 22,
@@ -79,14 +80,26 @@ func runSummary(cmd *cobra.Command, args []string) error {
 
 	var results []string
 
-	if sshEnabled && len(sshHosts) > 0 {
+	hostsList := strings.Split(sshHosts, ",")
+	hostsList = func(list []string) []string {
+		var ret []string
+		for _, h := range list {
+			h = strings.TrimSpace(h)
+			if h != "" {
+				ret = append(ret, h)
+			}
+		}
+		return ret
+	}(hostsList)
+
+	if sshEnabled && len(hostsList) > 0 {
 		numWorkers := parallel
-		if numWorkers > len(sshHosts) {
-			numWorkers = len(sshHosts)
+		if numWorkers > len(hostsList) {
+			numWorkers = len(hostsList)
 		}
 
-		jobs := make(chan string, len(sshHosts))
-		resultsCh := make(chan result, len(sshHosts))
+		jobs := make(chan string, len(hostsList))
+		resultsCh := make(chan result, len(hostsList))
 
 		var wg sync.WaitGroup
 		for i := 0; i < numWorkers; i++ {
@@ -100,7 +113,7 @@ func runSummary(cmd *cobra.Command, args []string) error {
 			}()
 		}
 
-		for _, host := range sshHosts {
+		for _, host := range hostsList {
 			jobs <- host
 		}
 		close(jobs)

@@ -21,3 +21,4 @@ go.work.sum
 # IDE files
 .idea/
 .vscode/
+.cursor/

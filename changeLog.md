@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+### v0.1.2(20260318)
+#### feature:
+1. 新增 `SystemInfo` 扩展数据模型，支持输出 `system_ext`、`cpu_ext`、`memory_ext`、`disk_ext`、`kernel_ext`、`network_ext`、`process_ext` 等扩展字段，便于承载更完整的主机诊断信息
+2. 新增 Percona Toolkit 风格的文本摘要输出，统一展示处理器、内存、挂载文件系统、网络统计、连接分布、Top 进程等关键信息
+
+#### optimization:
+1. 增强本地采集逻辑，补充 OS Release、CPU Socket 与缓存、NUMA、磁盘调度器、网络连接分布、OOM 进程等细粒度指标
+2. 增强远程 SSH 采集逻辑，基于 `lscpu`、`/proc/meminfo`、`/proc/net/dev`、`ss` 等命令解析扩展指标，提升远程系统摘要完整度
+3. 调整 `summary --hosts` 参数为逗号分隔输入形式，简化批量远程主机的命令行传参方式
+
 ### v0.1.1(20260218)
 #### feature:
 1. MCP新增远程SSH收集工具 `system_summary_remote`，支持通过SSH获取远程主机系统摘要信息
